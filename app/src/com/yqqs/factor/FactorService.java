@@ -405,7 +405,7 @@ public class FactorService extends AccessibilityService {
     private void loopBody() {
         try {
             SharedPreferences sp = getSharedPreferences("cfg", MODE_PRIVATE);
-            Set<String> want = new HashSet<>(sp.getStringSet("want", Collections.<String>emptySet()));
+            List<Set<String>> plans = loadPlans();
             Set<String> avoid = new HashSet<>(sp.getStringSet("avoid", Collections.<String>emptySet()));
             final float thr = sp.getFloat("threshold", 0.72f);
             int delay = sp.getInt("delay", 450);
@@ -421,19 +421,30 @@ public class FactorService extends AccessibilityService {
             ui.post(this::showOverlay);
             sleepMs(300);
 
-            if (!want.isEmpty()) {
-                String why = whyNot(want);
-                if (why != null) {
-                    setOverlayText(why);
+            // 可行性：逐组检查，不可行的踢掉；全都不行才报错停手
+            if (!plans.isEmpty()) {
+                List<Set<String>> usable = new ArrayList<>();
+                List<String> rejected = new ArrayList<>();
+                for (int i = 0; i < plans.size(); i++) {
+                    String why = whyNot(plans.get(i));
+                    if (why == null) usable.add(plans.get(i));
+                    else rejected.add("方案" + (i + 1) + "：" + why);
+                }
+                if (usable.isEmpty()) {
+                    setOverlayText("每一组方案都不可能成立：\n" + join(rejected));
                     running = false;
                     return;
                 }
+                plans = usable;
+                if (!rejected.isEmpty()) setOverlayText("跳过不可行的方案：\n" + join(rejected));
             }
+            Set<String> wantFlat = new HashSet<>();
+            for (Set<String> p : plans) wantFlat.addAll(p);
 
-            // 期望刷新次数：E = 1/P（精确计数，见 Odds）
+            // 期望刷新次数：E = 1/P（多方案用容斥，见 Odds）
             expRounds = 0;
             try {
-                double p = Odds.hitProb(want, avoid, tags());
+                double p = Odds.hitProbMulti(plans, avoid, tags());
                 if (p > 0) expRounds = 1.0 / p;
             } catch (Throwable ignored) { }
 
@@ -531,9 +542,10 @@ public class FactorService extends AccessibilityService {
                 String wantName = null, avoidName = null;
                 Set<String> found = new HashSet<>();
                 Set<String> avoidFound = new HashSet<>();
-                Set<String> allNames = new HashSet<>(want);
+                Set<String> allNames = new HashSet<>(wantFlat);
                 allNames.addAll(avoid);
                 Map<String, Float> sc = new HashMap<>();
+                Map<String, Float> peak = new HashMap<>();
 
                 for (int i = 0; i < 4; i++) {
                     Rect r = tiles[i];
@@ -543,7 +555,9 @@ public class FactorService extends AccessibilityService {
                     for (Map.Entry<String, Float> e : sc.entrySet()) {
                         float v = e.getValue();
                         String k = e.getKey();
-                        if (want.contains(k)) {
+                        Float old = peak.get(k);
+                        if (old == null || v > old) peak.put(k, v);
+                        if (wantFlat.contains(k)) {
                             if (v > bestWant) { bestWant = v; wantName = k; }
                             if (v >= thr) found.add(k);
                         } else {
@@ -554,15 +568,33 @@ public class FactorService extends AccessibilityService {
                 }
                 msMatch = System.currentTimeMillis() - t1;
 
-                List<String> missing = new ArrayList<>();
-                for (String w : want) if (!found.contains(w)) missing.add(w);
+                // 多方案：找一个「差得最少」的方案来展示
+                int bestPlan = -1;
+                List<String> bestMissing = null;
+                float planScore = 0f;
+                for (int pi = 0; pi < plans.size(); pi++) {
+                    List<String> miss = new ArrayList<>();
+                    float mn = 1f;
+                    for (String w : plans.get(pi)) {
+                        Float v = peak.get(w);
+                        float vv = v == null ? 0f : v;
+                        if (vv < thr) miss.add(w);
+                        if (vv < mn) mn = vv;
+                    }
+                    if (bestMissing == null || miss.size() < bestMissing.size()
+                            || (miss.size() == bestMissing.size() && mn > planScore)) {
+                        bestMissing = miss;
+                        planScore = mn;
+                        bestPlan = pi;
+                    }
+                }
 
-                boolean hitWant = want.isEmpty() || missing.isEmpty();
+                boolean hitWant = plans.isEmpty() || (bestMissing != null && bestMissing.isEmpty());
                 boolean hasAvoid = !avoidFound.isEmpty();
 
                 if (hitWant && !hasAvoid) {
                     release(shot);
-                    success(bestWant, bestAvoid, round, want);
+                    success(planScore, bestPlan, round, plans);
                     return;
                 }
 
@@ -585,10 +617,11 @@ public class FactorService extends AccessibilityService {
                         + "\n截" + msShot + " 匹" + msMatch + " 等" + lat + "ms "
                         + (canvasPath ? "缓存:复用" : "缓存:回落")
                         + "\n" + expLine(expRounds, el, avgMs)
-                        + "\n想要 "
-                        + String.format("%.2f", bestWant) + (wantName == null ? "" : " " + wantName)
+                        + "\n" + (plans.size() > 1 ? "方案" + (bestPlan + 1) + "/" + plans.size() + " " : "")
+                        + "想要 " + String.format("%.2f", planScore)
                         + " / 需 " + thr
-                        + (missing.isEmpty() ? "" : "\n还差 " + missing.size() + ": " + join(missing))
+                        + (bestMissing == null || bestMissing.isEmpty()
+                        ? "" : "\n还差 " + bestMissing.size() + ": " + join(bestMissing))
                         + (hasAvoid ? "\n不要的出现了: " + join(avoidFound) : "");
 
                 lastSig = sig;
@@ -615,8 +648,11 @@ public class FactorService extends AccessibilityService {
         }
     }
 
-    private void success(float wantScore, float avoidScore, int round, Set<String> want) {
-        String got = want.isEmpty() ? "" : "\n" + join(want);
+    private void success(float wantScore, int planIdx, int round, List<Set<String>> plans) {
+        String got = "";
+        if (planIdx >= 0 && planIdx < plans.size()) {
+            got = "\n" + (plans.size() > 1 ? "方案" + (planIdx + 1) + "：" : "") + join(plans.get(planIdx));
+        }
         setOverlayText("刷到了" + got + "\n共 " + round + " 轮 · 用时 "
                 + fmtClock(System.currentTimeMillis() - runStart)
                 + (expRounds > 0 ? " · 期望 " + (long) Math.ceil(expRounds) + " 轮" : "")
@@ -855,33 +891,42 @@ public class FactorService extends AccessibilityService {
         } catch (Throwable ignored) { }
     }
 
-    private boolean wantEmpty() {
+    private List<Set<String>> loadPlans() {
         SharedPreferences sp = getSharedPreferences("cfg", MODE_PRIVATE);
-        return sp.getStringSet("want", Collections.<String>emptySet()).isEmpty();
+        List<Set<String>> ps = new ArrayList<>();
+        int pc = sp.getInt("planCount", 0);
+        for (int i = 0; i < pc; i++) {
+            Set<String> s = new HashSet<>(sp.getStringSet("plan" + i,
+                    Collections.<String>emptySet()));
+            if (!s.isEmpty()) ps.add(s);
+        }
+        if (ps.isEmpty()) {   // 兼容旧版本：单个「要的」
+            Set<String> old = new HashSet<>(sp.getStringSet("want", Collections.<String>emptySet()));
+            if (!old.isEmpty()) ps.add(old);
+        }
+        return ps;
+    }
+
+    private boolean wantEmpty() {
+        return loadPlans().isEmpty();
     }
 
     private String targetLine() {
         SharedPreferences sp = getSharedPreferences("cfg", MODE_PRIVATE);
-        Set<String> w = sp.getStringSet("want", Collections.<String>emptySet());
-        Set<String> a = sp.getStringSet("avoid", Collections.<String>emptySet());
-        StringBuilder sb = new StringBuilder("刷: ");
-        if (w.isEmpty()) {
-            sb.append("(未选)");
+        List<Set<String>> ps = loadPlans();
+        Set<String> a = new HashSet<>(sp.getStringSet("avoid", Collections.<String>emptySet()));
+        StringBuilder sb = new StringBuilder();
+        if (ps.isEmpty()) {
+            sb.append("刷: (未选)");
+        } else if (ps.size() == 1) {
+            sb.append("刷: ").append(join(ps.get(0)));
         } else {
-            int i = 0;
-            for (String s : w) {
-                if (i++ > 0) sb.append("、");
-                sb.append(s);
+            for (int i = 0; i < ps.size(); i++) {
+                if (i > 0) sb.append(" 或 ");
+                sb.append(join(ps.get(i)));
             }
         }
-        if (!a.isEmpty()) {
-            sb.append("\n避: ");
-            int i = 0;
-            for (String s : a) {
-                if (i++ > 0) sb.append("、");
-                sb.append(s);
-            }
-        }
+        if (!a.isEmpty()) sb.append("\n避: ").append(join(a));
         return sb.toString();
     }
 

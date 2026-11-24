@@ -36,17 +36,20 @@ public class MainActivity extends Activity {
 
     static final String P = "cfg";
     static final int MODE_WANT = 0, MODE_AVOID = 1;
+    static final int MAX_PLANS = 4;
 
     private final List<String[]> items = new ArrayList<>();   // id, name, tag, desc
     private final List<Integer> shown = new ArrayList<>();    // items 里要显示的索引
     private final Map<String, Bitmap> icons = new HashMap<>();
-    private final Set<String> want = new HashSet<>();
+    private Set<String> want = new HashSet<>();      // 指向 plans.get(planIdx)，编辑的就是当前方案
     private final Set<String> avoid = new HashSet<>();
+    private final List<Set<String>> plans = new ArrayList<>();   // 多个目标组合，满足任一即停
+    private int planIdx = 0;
     private int mode = MODE_WANT;
     private boolean showExtra = false;   // 是否显示「特殊/周挑战」这类刷不到的因子
 
     private GridView grid;
-    private TextView status, hint;
+    private TextView status, hint, planLabel;
     private Button bWant, bAvoid;
     private FactorAdapter adapter;
 
@@ -57,8 +60,15 @@ public class MainActivity extends Activity {
         loadIcons();
 
         SharedPreferences sp = getSharedPreferences(P, MODE_PRIVATE);
-        want.addAll(sp.getStringSet("want", new HashSet<String>()));
         avoid.addAll(sp.getStringSet("avoid", new HashSet<String>()));
+        int pc = sp.getInt("planCount", 0);
+        for (int i = 0; i < pc && i < MAX_PLANS; i++) {
+            plans.add(new HashSet<>(sp.getStringSet("plan" + i, new HashSet<String>())));
+        }
+        if (plans.isEmpty()) {   // 兼容旧版本：以前的单个「要的」当作方案 1
+            plans.add(new HashSet<>(sp.getStringSet("want", new HashSet<String>())));
+        }
+        want = plans.get(0);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -129,6 +139,31 @@ public class MainActivity extends Activity {
         modes.addView(bAvoid, weight());
         root.addView(modes);
 
+        // 多方案：可同时设几组目标，任意一组满足就停（例：全面戒备+配置错误 或 全面戒备+分裂）
+        LinearLayout planRow = new LinearLayout(this);
+        planRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button bPrev = smallBtn("◀");
+        bPrev.setOnClickListener(v -> switchPlan(-1));
+        Button bNext = smallBtn("▶");
+        bNext.setOnClickListener(v -> switchPlan(1));
+        planLabel = new TextView(this);
+        planLabel.setTextColor(Color.parseColor("#D7DEEA"));
+        planLabel.setTextSize(11);
+        planLabel.setGravity(Gravity.CENTER);
+        Button bAdd = smallBtn("+ 方案");
+        bAdd.setOnClickListener(v -> addPlan());
+        Button bDel = smallBtn("删方案");
+        bDel.setOnClickListener(v -> delPlan());
+        LinearLayout.LayoutParams plw = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 2.4f);
+        plw.setMargins(dp(2), dp(2), dp(2), dp(2));
+        planRow.addView(bPrev, weight());
+        planRow.addView(planLabel, plw);
+        planRow.addView(bNext, weight());
+        planRow.addView(bAdd, weight());
+        planRow.addView(bDel, weight());
+        root.addView(planRow);
+
         // 刷不到的那 18 个（周挑战 8 + 特殊 10）默认不显示，避免误选
         Button bExtra = smallBtn("显示特殊/周挑战（18 个，刷不到）");
         bExtra.setTextSize(11);
@@ -194,7 +229,48 @@ public class MainActivity extends Activity {
         setContentView(root);
         rebuildShown();
         refreshModeButtons();
+        refreshPlan();
         updateHint();
+    }
+
+    // ---------- 多方案 ----------
+
+    private void refreshPlan() {
+        if (planLabel != null) {
+            planLabel.setText("方案 " + (planIdx + 1) + "/" + plans.size());
+        }
+        adapter.notifyDataSetChanged();
+        onResume();
+    }
+
+    private void switchPlan(int d) {
+        if (plans.size() <= 1) { toast("只有一组方案，点「+ 方案」再加一组"); return; }
+        planIdx = ((planIdx + d) % plans.size() + plans.size()) % plans.size();
+        want = plans.get(planIdx);
+        refreshPlan();
+        toast("正在编辑方案 " + (planIdx + 1));
+    }
+
+    private void addPlan() {
+        if (plans.size() >= MAX_PLANS) { toast("最多 " + MAX_PLANS + " 组方案"); return; }
+        plans.add(new HashSet<String>());
+        planIdx = plans.size() - 1;
+        want = plans.get(planIdx);
+        refreshPlan();
+        toast("已加方案 " + (planIdx + 1) + "，现在点图标往里选");
+    }
+
+    private void delPlan() {
+        if (plans.size() <= 1) {
+            want.clear();
+            refreshPlan();
+            updateHint();
+            return;
+        }
+        plans.remove(planIdx);
+        if (planIdx >= plans.size()) planIdx = plans.size() - 1;
+        want = plans.get(planIdx);
+        refreshPlan();
     }
 
     /** 依据 showExtra 重建「显示哪些因子」的索引表 */
@@ -218,7 +294,10 @@ public class MainActivity extends Activity {
         sb.append("   ");
         sb.append(Settings.canDrawOverlays(this) ? "悬浮窗 ✓" : "悬浮窗 ✗");
         sb.append("   ");
-        sb.append("要 ").append(want.size()).append(" · 不要 ").append(avoid.size());
+        int nonEmpty = 0;
+        for (Set<String> p : plans) if (!p.isEmpty()) nonEmpty++;
+        sb.append("方案 ").append(nonEmpty).append("/").append(plans.size())
+                .append(" 组 · 不要 ").append(avoid.size());
         sb.append("  图标 ").append(icons.size()).append("/").append(items.size());
         String ie = IconPack.error();
         if (!ie.isEmpty()) sb.append(" (").append(ie).append(")");
@@ -229,17 +308,20 @@ public class MainActivity extends Activity {
 
     /** 按当前勾选估算期望次数与耗时（3.2 轮/秒是实测均值，实际以悬浮窗为准） */
     private String expectText() {
-        if (want.isEmpty()) return "";
+        List<Set<String>> live = new ArrayList<>();
+        for (Set<String> p : plans) if (!p.isEmpty()) live.add(p);
+        if (live.isEmpty()) return "";
         Map<String, String> tg = new HashMap<>();
         for (String[] it : items) tg.put(it[1], it[2]);
-        double p = Odds.hitProb(want, avoid, tg);
+        double p = Odds.hitProbMulti(live, avoid, tg);
         if (p <= 0) return "期望：不可能出现";
         double e = 1.0 / p;
         String n = e >= 10000
                 ? String.format("%.1f万", e / 10000.0)
                 : String.valueOf((long) Math.ceil(e));
         long ms = (long) (e / 3.2 * 1000);
-        return "期望 " + n + " 次 ≈ " + FactorService.fmtClock(ms) + "（约 3.2 次/秒）";
+        return "期望 " + n + " 次 ≈ " + FactorService.fmtClock(ms)
+                + "（约 3.2 次/秒）" + (live.size() > 1 ? " · 任一方案命中即停" : "");
     }
 
     private void refreshModeButtons() {
@@ -249,11 +331,23 @@ public class MainActivity extends Activity {
     }
 
     private void updateHint() {
+        String cur = want.isEmpty() ? "（还没选）" : joinNames(want);
         if (mode == MODE_WANT) {
-            hint.setText("当前：点图标加入「要的」· 长按看介绍");
+            hint.setText("方案 " + (planIdx + 1) + "：" + cur + "\n点图标加入本方案 · 长按看介绍");
         } else {
-            hint.setText("当前：点图标加入「不要的」· 出现就继续刷");
+            hint.setText("方案 " + (planIdx + 1) + "：" + cur
+                    + "\n当前在选「不要的」，出现就继续刷");
         }
+    }
+
+    private static String joinNames(Set<String> s) {
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        for (String x : s) {
+            if (i++ > 0) sb.append("+");
+            sb.append(x);
+        }
+        return sb.toString();
     }
 
     /** 因子介绍：长按图标弹出，离线内容 + 可选跳 wiki */
@@ -303,12 +397,17 @@ public class MainActivity extends Activity {
             requestOverlay();
             return;
         }
-        if (want.isEmpty()) {
-            toast("请至少选择一个「要的」因子");
+        boolean any = false;
+        for (Set<String> p : plans) if (!p.isEmpty()) { any = true; break; }
+        if (!any) {
+            toast("请至少在一组方案里选一个「要的」因子");
             return;
         }
         SharedPreferences.Editor e = getSharedPreferences(P, MODE_PRIVATE).edit();
-        e.putStringSet("want", new HashSet<>(want));
+        e.putInt("planCount", plans.size());
+        for (int i = 0; i < plans.size(); i++) {
+            e.putStringSet("plan" + i, new HashSet<>(plans.get(i)));
+        }
         e.putStringSet("avoid", new HashSet<>(avoid));
         e.apply();
         // 这里只负责"把悬浮窗叫出来"，真正的开始由悬浮窗上的按钮触发，

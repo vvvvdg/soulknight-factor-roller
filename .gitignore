@@ -1,0 +1,13 @@
+# 构建产物与本地 SDK
+build/out/
+build/release.jks
+*.apk.bak
+
+# 本地工具链（体积巨大，不入库）
+_build/
+jdk/
+sdk/
+
+# 调试输出
+debug.png
+*.log

@@ -702,92 +702,9 @@ public class FactorService extends AccessibilityService {
         return m;
     }
 
-    private static int[] slotsOf(String tag) {
-        if (tag == null) return new int[]{0, 1, 2, 3};
-        if (tag.contains("大恶")) return new int[]{0};
-        if (tag.contains("中恶")) return new int[]{0, 1};
-        if (tag.contains("小恶")) return new int[]{0, 1, 2};
-        if (tag.contains("良")) return new int[]{2, 3};
-        if (tag.contains("中性")) return new int[]{1, 2};
-        return new int[]{0, 1, 2, 3};
-    }
-
-    // 类别代码：0 大恶 / 1 中恶 / 2 小恶 / 3 中性 / 4 小良 / 5 大良
-    private static final int[][] COMBOS = Odds.COMBOS;
-
-    private static final String[][] MUTEX = {
-            {"巨大化", "缩小隧道"}, {"攻速强化术", "肌肉强化术"},
-            {"孤勇者", "宠物巨大化"}, {"冷却减半", "冷却翻倍"},
-            {"好运气", "坏运气"}, {"天赋位置+1", "天赋选择+1"},
-            {"脆皮", "生命恢复术"}, {"天降神兵", "驯兽师"},
-            {"脆皮", "多重人格"}, {"硬壳守护", "多重人格"},
-            {"无限能量", "能量衰弱"}
-    };
-
-    private static int codeOf(String tag) {
-        if (tag == null) return -1;
-        if (tag.contains("大恶")) return 0;
-        if (tag.contains("中恶")) return 1;
-        if (tag.contains("小恶")) return 2;
-        if (tag.contains("中性")) return 3;
-        if (tag.contains("大良")) return 5;
-        if (tag.contains("小良")) return 4;
-        return -1;
-    }
-
-    private static boolean like(Set<String> set, String key) {
-        for (String s : set) {
-            if (s.equals(key) || s.contains(key) || key.contains(s)) return true;
-        }
-        return false;
-    }
-
-    /** 返回 null 表示可行；否则返回给用户看的原因 */
+    /** 返回 null 表示可行；否则返回给用户看的原因（规则实现见 Rules，App 里也用同一份） */
     private String whyNot(Set<String> want) {
-        for (String[] p : MUTEX) {
-            if (like(want, p[0]) && like(want, p[1]))
-                return "这两个因子互斥，永远不会同时出现：\n" + p[0] + " / " + p[1];
-        }
-        List<String> items = new ArrayList<>(want);
-        if (items.size() > 4) return "最多同时要求 4 个因子（一局只有 4 格）";
-        Map<String, String> tg = tags();
-        int n = items.size();
-        int[] code = new int[n];
-        int[][] slots = new int[n][];
-        for (int i = 0; i < n; i++) {
-            String t = tg.get(items.get(i));
-            code[i] = codeOf(t);
-            if (code[i] < 0) return "认不出「" + items.get(i) + "」属于哪一类，\n请回 App 重新勾选一次";
-            slots[i] = slotsOf(t);
-        }
-        int[] place = {-1, -1, -1, -1};
-        if (place(items, code, slots, 0, place)) return null;
-        return "这些因子不可能同时出现:\n" + join(want)
-                + "\n大恶只出在第1格，中恶1~2格，\n小恶1~3格，良性只出在第3、4格，\n"
-                + "且4格必须是wiki列出的17种组合之一";
-    }
-
-    private static boolean place(List<String> items, int[] code, int[][] slots,
-                                 int i, int[] place) {
-        if (i == items.size()) return fitsCombo(code, place);
-        for (int s : slots[i]) {
-            if (place[s] != -1) continue;
-            place[s] = i;
-            if (place(items, code, slots, i + 1, place)) return true;
-            place[s] = -1;
-        }
-        return false;
-    }
-
-    private static boolean fitsCombo(int[] code, int[] place) {
-        for (int[] c : COMBOS) {
-            boolean ok = true;
-            for (int s = 0; s < 4 && ok; s++) {
-                if (place[s] >= 0 && c[s] != code[place[s]]) ok = false;
-            }
-            if (ok) return true;
-        }
-        return false;
+        return Rules.whyNot(want, tags());
     }
 
     private void sleepMs(int ms) {

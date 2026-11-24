@@ -41,6 +41,8 @@ public class MainActivity extends Activity {
     private final List<String[]> items = new ArrayList<>();   // id, name, tag, desc
     private final List<Integer> shown = new ArrayList<>();    // items 里要显示的索引
     private final Map<String, Bitmap> icons = new HashMap<>();
+    private final Map<String, String> tagOf = new HashMap<>();   // 因子名 → 类别，规则判断用
+    private final Set<String> blocked = new HashSet<>();         // 和当前已选冲突、置灰不可选
     private Set<String> want = new HashSet<>();      // 指向 plans.get(planIdx)，编辑的就是当前方案
     private final Set<String> avoid = new HashSet<>();
     private final List<Set<String>> plans = new ArrayList<>();   // 多个目标组合，满足任一即停
@@ -83,7 +85,7 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView credit = new TextView(this);
-        credit.setText("by 1carvone  ·  v2.2");
+        credit.setText("by 1carvone  ·  v2.4");
         credit.setTextColor(Color.parseColor("#7A8399"));
         credit.setTextSize(10);
         credit.setGravity(Gravity.CENTER);
@@ -239,8 +241,21 @@ public class MainActivity extends Activity {
         if (planLabel != null) {
             planLabel.setText("方案 " + (planIdx + 1) + "/" + plans.size());
         }
+        rebuildBlocked();
         adapter.notifyDataSetChanged();
         onResume();
+    }
+
+    /** 和当前方案已选的因子冲突（互斥 / 凑不出合法组合 / 超过 4 格）的，置灰不可选 */
+    private void rebuildBlocked() {
+        blocked.clear();
+        for (String[] it : items) {
+            String n = it[1];
+            if (want.contains(n) || !rollable(it[2])) continue;
+            Set<String> t = new HashSet<>(want);
+            t.add(n);
+            if (Rules.whyNot(t, tagOf) != null) blocked.add(n);
+        }
     }
 
     private void switchPlan(int d) {
@@ -264,7 +279,6 @@ public class MainActivity extends Activity {
         if (plans.size() <= 1) {
             want.clear();
             refreshPlan();
-            updateHint();
             return;
         }
         plans.remove(planIdx);
@@ -332,8 +346,10 @@ public class MainActivity extends Activity {
 
     private void updateHint() {
         String cur = want.isEmpty() ? "（还没选）" : joinNames(want);
+        String tail = (mode == MODE_WANT && !blocked.isEmpty())
+                ? "\n灰色的和已选冲突，点了会告诉你原因" : "";
         if (mode == MODE_WANT) {
-            hint.setText("方案 " + (planIdx + 1) + "：" + cur + "\n点图标加入本方案 · 长按看介绍");
+            hint.setText("方案 " + (planIdx + 1) + "：" + cur + "\n点图标加入本方案 · 长按看介绍" + tail);
         } else {
             hint.setText("方案 " + (planIdx + 1) + "：" + cur
                     + "\n当前在选「不要的」，出现就继续刷");
@@ -446,6 +462,7 @@ public class MainActivity extends Activity {
                 String[] p = line.split("\\|", 4);
                 if (p.length >= 3) {
                     items.add(new String[]{p[0], p[1], p[2], p.length > 3 ? p[3] : ""});
+                    tagOf.put(p[1], p[2]);
                 }
             }
         } catch (Throwable ignored) { }
@@ -507,6 +524,8 @@ public class MainActivity extends Activity {
             final String[] it = items.get(shown.get(pos));
             final String name = it[1];
             final boolean ok = rollable(it[2]);
+            // 只在「选要的」时置灰；选「不要的」不受组合规则限制
+            final boolean blk = mode == MODE_WANT && blocked.contains(name);
 
             LinearLayout cell = new LinearLayout(MainActivity.this);
             cell.setOrientation(LinearLayout.VERTICAL);
@@ -530,12 +549,14 @@ public class MainActivity extends Activity {
             tv.setText(name);
             tv.setTextColor(want.contains(name) ? Color.parseColor("#7BE3A8")
                     : avoid.contains(name) ? Color.parseColor("#F08A8A")
+                    : blk ? Color.parseColor("#48505F")
                     : ok ? Color.parseColor("#B9C2D0") : Color.parseColor("#5E6675"));
             tv.setTextSize(9);
             tv.setGravity(Gravity.CENTER);
             tv.setMaxLines(2);
             cell.addView(tv);
             if (!ok) cell.setAlpha(0.62f);
+            else if (blk) cell.setAlpha(0.30f);
 
             cell.setOnLongClickListener(v -> {
                 showInfo(it);
@@ -547,6 +568,12 @@ public class MainActivity extends Activity {
                     showInfo(it);
                     return;
                 }
+                if (blk) {                      // 和已选的冲突：说明原因，不允许点
+                    Set<String> test = new HashSet<>(want);
+                    test.add(name);
+                    toast("「" + name + "」和已选的冲突：" + Rules.shortWhy(Rules.whyNot(test, tagOf)));
+                    return;
+                }
                 if (mode == MODE_WANT) {
                     if (want.contains(name)) want.remove(name);
                     else { want.add(name); avoid.remove(name); }
@@ -554,6 +581,7 @@ public class MainActivity extends Activity {
                     if (avoid.contains(name)) avoid.remove(name);
                     else { avoid.add(name); want.remove(name); }
                 }
+                rebuildBlocked();
                 adapter.notifyDataSetChanged();
                 onResume();
             });

@@ -206,7 +206,24 @@ public class MainActivity extends Activity {
         sb.append("  图标 ").append(icons.size()).append("/").append(items.size());
         String ie = IconPack.error();
         if (!ie.isEmpty()) sb.append(" (").append(ie).append(")");
+        String ex = expectText();
+        if (!ex.isEmpty()) sb.append("\n").append(ex);
         status.setText(sb.toString());
+    }
+
+    /** 按当前勾选估算期望次数与耗时（3.2 轮/秒是实测均值，实际以悬浮窗为准） */
+    private String expectText() {
+        if (want.isEmpty()) return "";
+        Map<String, String> tg = new HashMap<>();
+        for (String[] it : items) tg.put(it[1], it[2]);
+        double p = Odds.hitProb(want, avoid, tg);
+        if (p <= 0) return "期望：不可能出现";
+        double e = 1.0 / p;
+        String n = e >= 10000
+                ? String.format("%.1f万", e / 10000.0)
+                : String.valueOf((long) Math.ceil(e));
+        long ms = (long) (e / 3.2 * 1000);
+        return "期望 " + n + " 次 ≈ " + FactorService.fmtClock(ms) + "（约 3.2 次/秒）";
     }
 
     private void refreshModeButtons() {

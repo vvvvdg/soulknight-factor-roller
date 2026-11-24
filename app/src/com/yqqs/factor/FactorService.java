@@ -49,6 +49,7 @@ public class FactorService extends AccessibilityService {
     private Thread worker;
     private volatile long runStart;
     private volatile int roundNow;
+    private volatile double expRounds;
 
     private WindowManager wm;
     private View overlay;
@@ -429,6 +430,13 @@ public class FactorService extends AccessibilityService {
                 }
             }
 
+            // 期望刷新次数：E = 1/P（精确计数，见 Odds）
+            expRounds = 0;
+            try {
+                double p = Odds.hitProb(want, avoid, tags());
+                if (p > 0) expRounds = 1.0 / p;
+            } catch (Throwable ignored) { }
+
             Rect btn = null;
             Rect[] tiles = null;
             int round = 0;
@@ -576,6 +584,7 @@ public class FactorService extends AccessibilityService {
                 String tag = fmtClock(el) + "  第 " + (round + 1) + " 轮 " + rate + "/s" + decay
                         + "\n截" + msShot + " 匹" + msMatch + " 等" + lat + "ms "
                         + (canvasPath ? "缓存:复用" : "缓存:回落")
+                        + "\n" + expLine(expRounds, el, avgMs)
                         + "\n想要 "
                         + String.format("%.2f", bestWant) + (wantName == null ? "" : " " + wantName)
                         + " / 需 " + thr
@@ -610,6 +619,7 @@ public class FactorService extends AccessibilityService {
         String got = want.isEmpty() ? "" : "\n" + join(want);
         setOverlayText("刷到了" + got + "\n共 " + round + " 轮 · 用时 "
                 + fmtClock(System.currentTimeMillis() - runStart)
+                + (expRounds > 0 ? " · 期望 " + (long) Math.ceil(expRounds) + " 轮" : "")
                 + " · 想要 " + String.format("%.2f", wantScore));
         ui.post(() -> {
             try {
@@ -667,15 +677,7 @@ public class FactorService extends AccessibilityService {
     }
 
     // 类别代码：0 大恶 / 1 中恶 / 2 小恶 / 3 中性 / 4 小良 / 5 大良
-    private static final int[][] COMBOS = {
-            {0, 1, 3, 5}, {0, 1, 4, 5}, {0, 1, 5, 5},
-            {0, 2, 3, 5}, {0, 2, 4, 5}, {0, 2, 5, 5},
-            {0, 3, 3, 5}, {0, 3, 4, 5}, {0, 3, 4, 4},
-            {1, 1, 3, 5}, {1, 1, 4, 5},
-            {1, 2, 3, 5}, {1, 2, 4, 5},
-            {1, 3, 4, 4}, {1, 3, 3, 4},
-            {2, 2, 2, 5}, {2, 2, 3, 4}
-    };
+    private static final int[][] COMBOS = Odds.COMBOS;
 
     private static final String[][] MUTEX = {
             {"巨大化", "缩小隧道"}, {"攻速强化术", "肌肉强化术"},
@@ -771,6 +773,20 @@ public class FactorService extends AccessibilityService {
         long h = s / 3600, m = (s % 3600) / 60, sec = s % 60;
         if (h > 0) return String.format("%d:%02d:%02d", h, m, sec);
         return String.format("%d:%02d", m, sec);
+    }
+
+    /**
+     * 期望与倒计时。几何分布无记忆：还没刷到时，「还要刷多少次」的条件期望仍是 E，
+     * 所以这里用 剩余 = 期望总耗时 - 已用时间 做减法，给用户一个随时间下降的倒计时。
+     */
+    static String expLine(double expRounds, long elapsedMs, long avgMs) {
+        if (expRounds <= 0) return "期望 —";
+        long total = (long) (expRounds * Math.max(1, avgMs));
+        long remain = Math.max(0, total - elapsedMs);
+        String e = expRounds >= 10000
+                ? String.format("%.1f万", expRounds / 10000.0)
+                : String.valueOf((long) Math.ceil(expRounds));
+        return "期望 " + e + " 轮 ≈ " + fmtClock(total) + " · 还差 " + fmtClock(remain);
     }
 
     private void showOverlay() {

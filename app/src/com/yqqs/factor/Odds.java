@@ -63,24 +63,26 @@ final class Odds {
             int c = codeOf(tagOf.get(w));
             if (c >= 0) a[c]++;
         }
-        double num = 0, den = 0;
+        // 17 种组合等概率，于是 P = 平均(每种组合内部的命中比例)
+        double sum = 0;
         for (int[] combo : COMBOS) {
             int[] k = new int[6];
             for (int c : combo) k[c]++;
-            double dn = 1, nn = 1;
-            boolean ok = true;
+            double ratio = 1;
             for (int c = 0; c < 6; c++) {
-                if (k[c] == 0) continue;
-                dn *= fall(pool[c], k[c]);
-                if (m[c] > k[c]) { ok = false; break; }
-                nn *= fall(k[c], m[c]) * fall(pool[c] - a[c] - m[c], k[c] - m[c]);
+                if (k[c] == 0) {
+                    // 这个组合里没有类别 c 的格子；但要的因子属于 c → 该组合不可能命中
+                    if (m[c] > 0) { ratio = 0; break; }
+                    continue;
+                }
+                if (m[c] > k[c]) { ratio = 0; break; }
+                double den = fall(pool[c], k[c]);
+                if (den <= 0) { ratio = 0; break; }
+                ratio *= fall(k[c], m[c]) * fall(pool[c] - a[c] - m[c], k[c] - m[c]) / den;
             }
-            if (!ok) continue;
-            den += dn;
-            num += nn;
+            sum += ratio;
         }
-        if (den <= 0) return 0;
-        return num / den;
+        return sum / COMBOS.length;
     }
 
     /** 下降阶乘 n·(n-1)·…·(n-k+1) */

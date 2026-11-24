@@ -72,6 +72,14 @@ public class MainActivity extends Activity {
         title.setGravity(Gravity.CENTER);
         root.addView(title);
 
+        TextView credit = new TextView(this);
+        credit.setText("by 1carvone  ·  v2.2");
+        credit.setTextColor(Color.parseColor("#7A8399"));
+        credit.setTextSize(10);
+        credit.setGravity(Gravity.CENTER);
+        credit.setPadding(0, dp(1), 0, dp(2));
+        root.addView(credit);
+
         status = new TextView(this);
         status.setTextColor(Color.parseColor("#8A93A6"));
         status.setTextSize(11);
@@ -174,6 +182,14 @@ public class MainActivity extends Activity {
         bottom.addView(bStart, lw);
         bottom.addView(bStop, weight());
         root.addView(bottom);
+
+        TextView sign = new TextView(this);
+        sign.setText("开发者 1carvone · github.com/vvvvdg/soulknight-factor-roller");
+        sign.setTextColor(Color.parseColor("#5A6273"));
+        sign.setTextSize(9);
+        sign.setGravity(Gravity.CENTER);
+        sign.setPadding(0, dp(6), 0, 0);
+        root.addView(sign);
 
         setContentView(root);
         rebuildShown();

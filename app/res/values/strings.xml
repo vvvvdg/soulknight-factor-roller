@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">元气刷因子</string>
-    <string name="service_label">元气刷因子</string>
+    <string name="service_label">元气刷因子 · 1carvone</string>
     <string name="acc_desc">用于读取屏幕内容并自动点击刷新按钮，直到刷出指定的挑战因子。不会读取或上传任何个人信息。</string>
 </resources>

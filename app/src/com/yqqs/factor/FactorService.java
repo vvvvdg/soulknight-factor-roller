@@ -538,12 +538,7 @@ public class FactorService extends AccessibilityService {
                 retries = 0;
 
                 long t1 = System.currentTimeMillis();
-                float bestWant = 0f, bestAvoid = 0f;
-                String wantName = null, avoidName = null;
-                Set<String> found = new HashSet<>();
-                Set<String> avoidFound = new HashSet<>();
-                Set<String> allNames = new HashSet<>(wantFlat);
-                allNames.addAll(avoid);
+                // 每轮只比「要的」：避开项只在已经命中时才比，省掉每轮一倍以上的匹配量
                 Map<String, Float> sc = new HashMap<>();
                 Map<String, Float> peak = new HashMap<>();
 
@@ -551,19 +546,10 @@ public class FactorService extends AccessibilityService {
                     Rect r = tiles[i];
                     if (r.width() < 24) continue;
                     sc.clear();
-                    scanTile(shot, r, allNames, sc);
+                    scanTile(shot, r, wantFlat, sc);
                     for (Map.Entry<String, Float> e : sc.entrySet()) {
-                        float v = e.getValue();
-                        String k = e.getKey();
-                        Float old = peak.get(k);
-                        if (old == null || v > old) peak.put(k, v);
-                        if (wantFlat.contains(k)) {
-                            if (v > bestWant) { bestWant = v; wantName = k; }
-                            if (v >= thr) found.add(k);
-                        } else {
-                            if (v > bestAvoid) { bestAvoid = v; avoidName = k; }
-                            if (v >= thr) avoidFound.add(k);
-                        }
+                        Float old = peak.get(e.getKey());
+                        if (old == null || e.getValue() > old) peak.put(e.getKey(), e.getValue());
                     }
                 }
                 msMatch = System.currentTimeMillis() - t1;
@@ -590,6 +576,22 @@ public class FactorService extends AccessibilityService {
                 }
 
                 boolean hitWant = plans.isEmpty() || (bestMissing != null && bestMissing.isEmpty());
+
+                // 命中之后才判定「不要的」：有就继续刷，没有就停
+                Set<String> avoidFound = new HashSet<>();
+                if (hitWant && !avoid.isEmpty()) {
+                    long ta = System.currentTimeMillis();
+                    for (int i = 0; i < 4; i++) {
+                        Rect r = tiles[i];
+                        if (r.width() < 24) continue;
+                        sc.clear();
+                        scanTile(shot, r, avoid, sc);
+                        for (Map.Entry<String, Float> e : sc.entrySet()) {
+                            if (e.getValue() >= thr) avoidFound.add(e.getKey());
+                        }
+                    }
+                    msMatch += System.currentTimeMillis() - ta;
+                }
                 boolean hasAvoid = !avoidFound.isEmpty();
 
                 if (hitWant && !hasAvoid) {

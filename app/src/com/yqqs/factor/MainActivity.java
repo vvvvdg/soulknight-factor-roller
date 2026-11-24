@@ -51,8 +51,10 @@ public class MainActivity extends Activity {
     private boolean showExtra = false;   // 是否显示「特殊/周挑战」这类刷不到的因子
 
     private GridView grid;
-    private TextView status, hint, planLabel;
-    private Button bWant, bAvoid;
+    private TextView status, hint, editorTitle;
+    private Button bWant, bAvoid, bExtra;
+    private LinearLayout listRoot, editorRoot, planList;
+    private View current;
     private FactorAdapter adapter;
 
     @Override
@@ -72,6 +74,26 @@ public class MainActivity extends Activity {
         }
         want = plans.get(0);
 
+        buildListScreen();
+        buildEditorScreen();
+        setScreen(listRoot);
+
+        rebuildShown();
+        rebuildPlanList();
+        refreshModeButtons();
+        refreshEditor();
+    }
+
+    // ---------- 两个界面 ----------
+
+    private void setScreen(View v) {
+        if (v.getParent() instanceof ViewGroup) ((ViewGroup) v.getParent()).removeView(v);
+        setContentView(v);
+        current = v;
+    }
+
+    /** 一级界面：方案列表 */
+    private void buildListScreen() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.parseColor("#11141A"));
@@ -85,7 +107,7 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView credit = new TextView(this);
-        credit.setText("by 1carvone  ·  v2.4");
+        credit.setText("by 1carvone  ·  v2.5");
         credit.setTextColor(Color.parseColor("#7A8399"));
         credit.setTextSize(10);
         credit.setGravity(Gravity.CENTER);
@@ -105,13 +127,6 @@ public class MainActivity extends Activity {
         bAcc.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
         Button bOverlay = smallBtn("悬浮窗权限");
         bOverlay.setOnClickListener(v -> requestOverlay());
-        Button bClear = smallBtn("清空选择");
-        bClear.setOnClickListener(v -> {
-            want.clear();
-            avoid.clear();
-            adapter.notifyDataSetChanged();
-            updateHint();
-        });
         Button bTest = smallBtn("测试定位");
         bTest.setOnClickListener(v -> {
             if (FactorService.instance == null) {
@@ -126,77 +141,30 @@ public class MainActivity extends Activity {
         perms.addView(bAcc, weight());
         perms.addView(bOverlay, weight());
         perms.addView(bTest, weight());
-        perms.addView(bClear, weight());
         root.addView(perms);
 
-        LinearLayout modes = new LinearLayout(this);
-        modes.setOrientation(LinearLayout.HORIZONTAL);
-        bWant = smallBtn("① 选「要的」");
-        bWant.setOnClickListener(v -> { mode = MODE_WANT; refreshModeButtons(); });
-        bAvoid = smallBtn("② 选「不要的」");
-        bAvoid.setOnClickListener(v -> { mode = MODE_AVOID; refreshModeButtons(); });
-        LinearLayout.LayoutParams mw = weight();
-        mw.topMargin = dp(8);
-        modes.addView(bWant, mw);
-        modes.addView(bAvoid, weight());
-        root.addView(modes);
+        TextView listTitle = new TextView(this);
+        listTitle.setText("目标方案（满足任意一组就停）");
+        listTitle.setTextColor(Color.parseColor("#8A93A6"));
+        listTitle.setTextSize(11);
+        listTitle.setGravity(Gravity.LEFT);
+        listTitle.setPadding(dp(2), dp(10), 0, dp(4));
+        root.addView(listTitle);
 
-        // 多方案：可同时设几组目标，任意一组满足就停（例：全面戒备+配置错误 或 全面戒备+分裂）
-        LinearLayout planRow = new LinearLayout(this);
-        planRow.setOrientation(LinearLayout.HORIZONTAL);
-        Button bPrev = smallBtn("◀");
-        bPrev.setOnClickListener(v -> switchPlan(-1));
-        Button bNext = smallBtn("▶");
-        bNext.setOnClickListener(v -> switchPlan(1));
-        planLabel = new TextView(this);
-        planLabel.setTextColor(Color.parseColor("#D7DEEA"));
-        planLabel.setTextSize(11);
-        planLabel.setGravity(Gravity.CENTER);
-        Button bAdd = smallBtn("+ 方案");
-        bAdd.setOnClickListener(v -> addPlan());
-        Button bDel = smallBtn("删方案");
-        bDel.setOnClickListener(v -> delPlan());
-        LinearLayout.LayoutParams plw = new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 2.4f);
-        plw.setMargins(dp(2), dp(2), dp(2), dp(2));
-        planRow.addView(bPrev, weight());
-        planRow.addView(planLabel, plw);
-        planRow.addView(bNext, weight());
-        planRow.addView(bAdd, weight());
-        planRow.addView(bDel, weight());
-        root.addView(planRow);
+        planList = new LinearLayout(this);
+        planList.setOrientation(LinearLayout.VERTICAL);
+        root.addView(planList);
 
-        // 刷不到的那 18 个（周挑战 8 + 特殊 10）默认不显示，避免误选
-        Button bExtra = smallBtn("显示特殊/周挑战（18 个，刷不到）");
-        bExtra.setTextSize(11);
-        bExtra.setOnClickListener(v -> {
-            showExtra = !showExtra;
-            bExtra.setText(showExtra ? "只显示可刷的 59 个" : "显示特殊/周挑战（18 个，刷不到）");
-            rebuildShown();
-            adapter.notifyDataSetChanged();
-            updateHint();
-        });
-        LinearLayout.LayoutParams ew = new LinearLayout.LayoutParams(
+        Button bAdd = smallBtn("+ 新建方案");
+        bAdd.setBackgroundColor(Color.parseColor("#232F3A"));
+        LinearLayout.LayoutParams aw = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        ew.setMargins(dp(2), 0, dp(2), dp(2));
-        root.addView(bExtra, ew);
+        aw.setMargins(dp(2), dp(4), dp(2), dp(4));
+        bAdd.setOnClickListener(v -> addPlan());
+        root.addView(bAdd, aw);
 
-        hint = new TextView(this);
-        hint.setTextColor(Color.parseColor("#6FC08F"));
-        hint.setTextSize(11);
-        hint.setGravity(Gravity.CENTER);
-        hint.setPadding(0, dp(6), 0, dp(4));
-        root.addView(hint);
-
-        grid = new GridView(this);
-        grid.setNumColumns(4);
-        grid.setHorizontalSpacing(dp(2));
-        grid.setVerticalSpacing(dp(2));
-        grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
-        grid.setBackgroundColor(Color.parseColor("#0C0E13"));
-        adapter = new FactorAdapter();
-        grid.setAdapter(adapter);
-        root.addView(grid, new LinearLayout.LayoutParams(
+        TextView spacer = new TextView(this);
+        root.addView(spacer, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         LinearLayout bottom = new LinearLayout(this);
@@ -228,21 +196,225 @@ public class MainActivity extends Activity {
         sign.setPadding(0, dp(6), 0, 0);
         root.addView(sign);
 
-        setContentView(root);
-        rebuildShown();
-        refreshModeButtons();
-        refreshPlan();
-        updateHint();
+        listRoot = root;
     }
 
-    // ---------- 多方案 ----------
+    /** 二级界面：改某组方案里的因子 */
+    private void buildEditorScreen() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.parseColor("#11141A"));
+        root.setPadding(dp(10), dp(10), dp(10), dp(8));
 
-    private void refreshPlan() {
-        if (planLabel != null) {
-            planLabel.setText("方案 " + (planIdx + 1) + "/" + plans.size());
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        Button bBack = smallBtn("← 返回");
+        bBack.setOnClickListener(v -> backToList());
+        editorTitle = new TextView(this);
+        editorTitle.setTextColor(Color.WHITE);
+        editorTitle.setTextSize(13);
+        editorTitle.setGravity(Gravity.CENTER);
+        head.addView(bBack, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        head.addView(editorTitle, weight());
+        root.addView(head);
+
+        LinearLayout modes = new LinearLayout(this);
+        modes.setOrientation(LinearLayout.HORIZONTAL);
+        bWant = smallBtn("① 选「要的」");
+        bWant.setOnClickListener(v -> {
+            if (mode != MODE_WANT) {
+                mode = MODE_WANT;
+                refreshModeButtons();
+                adapter.notifyDataSetChanged();
+            }
+        });
+        bAvoid = smallBtn("② 选「不要的」");
+        bAvoid.setOnClickListener(v -> {
+            if (mode != MODE_AVOID) {
+                mode = MODE_AVOID;
+                refreshModeButtons();
+                adapter.notifyDataSetChanged();
+            }
+        });
+        LinearLayout.LayoutParams mw = weight();
+        mw.topMargin = dp(6);
+        modes.addView(bWant, mw);
+        modes.addView(bAvoid, weight());
+        root.addView(modes);
+
+        // 刷不到的那 18 个（周挑战 8 + 特殊 10）默认不显示，避免误选
+        bExtra = smallBtn("显示特殊/周挑战（18 个，刷不到）");
+        bExtra.setTextSize(11);
+        bExtra.setOnClickListener(v -> {
+            showExtra = !showExtra;
+            bExtra.setText(showExtra ? "只显示可刷的 59 个" : "显示特殊/周挑战（18 个，刷不到）");
+            rebuildShown();
+            adapter.notifyDataSetChanged();
+            updateHint();
+        });
+        LinearLayout.LayoutParams ew = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        ew.setMargins(dp(2), dp(2), dp(2), dp(2));
+        root.addView(bExtra, ew);
+
+        hint = new TextView(this);
+        hint.setTextColor(Color.parseColor("#6FC08F"));
+        hint.setTextSize(11);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, dp(6), 0, dp(4));
+        root.addView(hint);
+
+        grid = new GridView(this);
+        grid.setNumColumns(4);
+        grid.setHorizontalSpacing(dp(2));
+        grid.setVerticalSpacing(dp(2));
+        grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+        grid.setBackgroundColor(Color.parseColor("#0C0E13"));
+        adapter = new FactorAdapter();
+        grid.setAdapter(adapter);
+        root.addView(grid, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        editorRoot = root;
+    }
+
+    private void openPlan(int idx) {
+        planIdx = idx;
+        want = plans.get(idx);
+        mode = MODE_WANT;
+        refreshModeButtons();
+        refreshEditor();
+        setScreen(editorRoot);
+    }
+
+    private void openAvoid() {
+        mode = MODE_AVOID;
+        refreshModeButtons();
+        refreshEditor();
+        setScreen(editorRoot);
+    }
+
+    private void backToList() {
+        mode = MODE_WANT;
+        save();
+        refreshModeButtons();
+        rebuildPlanList();
+        onResume();
+        setScreen(listRoot);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (current == editorRoot) backToList();
+        else super.onBackPressed();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        save();
+    }
+
+    private void save() {
+        SharedPreferences.Editor e = getSharedPreferences(P, MODE_PRIVATE).edit();
+        e.putInt("planCount", plans.size());
+        for (int i = 0; i < plans.size(); i++) {
+            e.putStringSet("plan" + i, new HashSet<>(plans.get(i)));
+        }
+        e.putStringSet("avoid", new HashSet<>(avoid));
+        e.apply();
+    }
+
+    /** 一级界面的方案列表 */
+    private void rebuildPlanList() {
+        if (planList == null) return;
+        planList.removeAllViews();
+        for (int i = 0; i < plans.size(); i++) {
+            final int idx = i;
+            Set<String> p = plans.get(i);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setBackground(roundRect("#161A22", p.isEmpty() ? "#2A3242" : "#2F7D4F"));
+            LinearLayout.LayoutParams rw = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            rw.setMargins(dp(2), dp(3), dp(2), dp(3));
+            row.setPadding(dp(10), dp(8), dp(6), dp(8));
+
+            LinearLayout inner = new LinearLayout(this);
+            inner.setOrientation(LinearLayout.VERTICAL);
+            TextView t1 = new TextView(this);
+            t1.setText("方案 " + (i + 1) + (p.isEmpty() ? "　（未选）" : ""));
+            t1.setTextColor(p.isEmpty() ? Color.parseColor("#7A8399") : Color.WHITE);
+            t1.setTextSize(13);
+            TextView t2 = new TextView(this);
+            t2.setText(p.isEmpty() ? "点这一行进去选因子" : joinNames(p));
+            t2.setTextColor(Color.parseColor("#7BE3A8"));
+            t2.setTextSize(11);
+            inner.addView(t1);
+            inner.addView(t2);
+            inner.setOnClickListener(v -> openPlan(idx));
+            row.setOnClickListener(v -> openPlan(idx));
+            row.addView(inner, new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+            Button bDel = smallBtn("删");
+            bDel.setTextSize(11);
+            bDel.setOnClickListener(v -> delPlan(idx));
+            LinearLayout.LayoutParams dw = new LinearLayout.LayoutParams(dp(52),
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            dw.setMargins(dp(4), 0, 0, 0);
+            row.addView(bDel, dw);
+
+            planList.addView(row, rw);
+        }
+
+        // 全局「不要的」入口
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setBackground(roundRect("#161A22", avoid.isEmpty() ? "#2A3242" : "#8A3B3B"));
+        LinearLayout.LayoutParams rw = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rw.setMargins(dp(2), dp(8), dp(2), dp(3));
+        row.setPadding(dp(10), dp(8), dp(10), dp(8));
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        TextView t1 = new TextView(this);
+        t1.setText("不要的因子（全局）");
+        t1.setTextColor(Color.WHITE);
+        t1.setTextSize(13);
+        TextView t2 = new TextView(this);
+        t2.setText(avoid.isEmpty() ? "没设 · 出现了就继续刷" : joinNames(avoid));
+        t2.setTextColor(Color.parseColor("#F08A8A"));
+        t2.setTextSize(11);
+        inner.addView(t1);
+        inner.addView(t2);
+        inner.setOnClickListener(v -> openAvoid());
+        row.setOnClickListener(v -> openAvoid());
+        row.addView(inner, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        planList.addView(row, rw);
+    }
+
+    private GradientDrawable roundRect(String fill, String stroke) {
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(8));
+        g.setColor(Color.parseColor(fill));
+        g.setStroke(dp(1), Color.parseColor(stroke));
+        return g;
+    }
+
+    // ---------- 方案增删 ----------
+
+    /** 编辑当前方案后刷新二级界面 */
+    private void refreshEditor() {
+        if (editorTitle != null) {
+            editorTitle.setText(mode == MODE_AVOID ? "不要的因子（全局）"
+                    : "方案 " + (planIdx + 1) + " / " + plans.size());
         }
         rebuildBlocked();
         adapter.notifyDataSetChanged();
+        updateHint();
         onResume();
     }
 
@@ -258,33 +430,32 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void switchPlan(int d) {
-        if (plans.size() <= 1) { toast("只有一组方案，点「+ 方案」再加一组"); return; }
-        planIdx = ((planIdx + d) % plans.size() + plans.size()) % plans.size();
-        want = plans.get(planIdx);
-        refreshPlan();
-        toast("正在编辑方案 " + (planIdx + 1));
-    }
-
     private void addPlan() {
         if (plans.size() >= MAX_PLANS) { toast("最多 " + MAX_PLANS + " 组方案"); return; }
         plans.add(new HashSet<String>());
         planIdx = plans.size() - 1;
         want = plans.get(planIdx);
-        refreshPlan();
-        toast("已加方案 " + (planIdx + 1) + "，现在点图标往里选");
+        save();
+        rebuildPlanList();
+        onResume();
+        openPlan(planIdx);
+        toast("已加方案 " + (planIdx + 1) + "，点图标往里选");
     }
 
-    private void delPlan() {
+    private void delPlan(int idx) {
         if (plans.size() <= 1) {
-            want.clear();
-            refreshPlan();
+            plans.get(0).clear();
+            save();
+            rebuildPlanList();
+            onResume();
             return;
         }
-        plans.remove(planIdx);
+        plans.remove(idx);
         if (planIdx >= plans.size()) planIdx = plans.size() - 1;
         want = plans.get(planIdx);
-        refreshPlan();
+        save();
+        rebuildPlanList();
+        onResume();
     }
 
     /** 依据 showExtra 重建「显示哪些因子」的索引表 */
@@ -303,6 +474,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (status == null) return;
         StringBuilder sb = new StringBuilder();
         sb.append(accOn() ? "无障碍 ✓" : "无障碍 ✗");
         sb.append("   ");
@@ -325,9 +497,7 @@ public class MainActivity extends Activity {
         List<Set<String>> live = new ArrayList<>();
         for (Set<String> p : plans) if (!p.isEmpty()) live.add(p);
         if (live.isEmpty()) return "";
-        Map<String, String> tg = new HashMap<>();
-        for (String[] it : items) tg.put(it[1], it[2]);
-        double p = Odds.hitProbMulti(live, avoid, tg);
+        double p = Odds.hitProbMulti(live, avoid, tagOf);
         if (p <= 0) return "期望：不可能出现";
         double e = 1.0 / p;
         String n = e >= 10000
@@ -339,20 +509,25 @@ public class MainActivity extends Activity {
     }
 
     private void refreshModeButtons() {
+        if (bWant == null || bAvoid == null) return;
         bWant.setBackgroundColor(Color.parseColor(mode == MODE_WANT ? "#2F7D4F" : "#232830"));
         bAvoid.setBackgroundColor(Color.parseColor(mode == MODE_AVOID ? "#8A3B3B" : "#232830"));
+        if (editorTitle != null) {
+            editorTitle.setText(mode == MODE_AVOID ? "不要的因子（全局）"
+                    : "方案 " + (planIdx + 1) + " / " + plans.size());
+        }
         updateHint();
     }
 
     private void updateHint() {
-        String cur = want.isEmpty() ? "（还没选）" : joinNames(want);
-        String tail = (mode == MODE_WANT && !blocked.isEmpty())
-                ? "\n灰色的和已选冲突，点了会告诉你原因" : "";
+        if (hint == null) return;
         if (mode == MODE_WANT) {
+            String cur = want.isEmpty() ? "（还没选）" : joinNames(want);
+            String tail = !blocked.isEmpty() ? "\n灰色的和已选冲突，点了会告诉你原因" : "";
             hint.setText("方案 " + (planIdx + 1) + "：" + cur + "\n点图标加入本方案 · 长按看介绍" + tail);
         } else {
-            hint.setText("方案 " + (planIdx + 1) + "：" + cur
-                    + "\n当前在选「不要的」，出现就继续刷");
+            String cur = avoid.isEmpty() ? "（没设，出现了也照停）" : joinNames(avoid);
+            hint.setText("不要的（全局）：" + cur + "\n这几个出现了就继续刷（不影响各方案）");
         }
     }
 
@@ -419,13 +594,7 @@ public class MainActivity extends Activity {
             toast("请至少在一组方案里选一个「要的」因子");
             return;
         }
-        SharedPreferences.Editor e = getSharedPreferences(P, MODE_PRIVATE).edit();
-        e.putInt("planCount", plans.size());
-        for (int i = 0; i < plans.size(); i++) {
-            e.putStringSet("plan" + i, new HashSet<>(plans.get(i)));
-        }
-        e.putStringSet("avoid", new HashSet<>(avoid));
-        e.apply();
+        save();
         // 这里只负责"把悬浮窗叫出来"，真正的开始由悬浮窗上的按钮触发，
         // 免得游戏还没开就自己刷起来
         FactorService.instance.showPanel();
@@ -547,8 +716,8 @@ public class MainActivity extends Activity {
 
             TextView tv = new TextView(MainActivity.this);
             tv.setText(name);
-            tv.setTextColor(want.contains(name) ? Color.parseColor("#7BE3A8")
-                    : avoid.contains(name) ? Color.parseColor("#F08A8A")
+            tv.setTextColor(avoid.contains(name) ? Color.parseColor("#F08A8A")
+                    : want.contains(name) ? Color.parseColor("#7BE3A8")
                     : blk ? Color.parseColor("#48505F")
                     : ok ? Color.parseColor("#B9C2D0") : Color.parseColor("#5E6675"));
             tv.setTextSize(9);
@@ -583,7 +752,8 @@ public class MainActivity extends Activity {
                 }
                 rebuildBlocked();
                 adapter.notifyDataSetChanged();
-                onResume();
+                updateHint();
+                save();
             });
             return cell;
         }
@@ -596,7 +766,7 @@ public class MainActivity extends Activity {
                 g.setStroke(dp(2), Color.parseColor("#3FBF74"));
             } else if (avoid.contains(name)) {
                 g.setColor(Color.parseColor("#33161A"));
-                g.setStroke(dp(2), Color.parseColor("#D45555"));
+                g.setStroke(dp(2), Color.parseColor("#D25555"));
             } else {
                 g.setColor(Color.parseColor("#161A22"));
             }

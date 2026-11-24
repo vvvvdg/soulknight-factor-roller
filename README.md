@@ -1,6 +1,6 @@
 # 元气骑士 · 挑战因子自动刷新器
 
-> 开发者：**1carvone** ｜ 当前版本 **v2.4**
+> 开发者：**1carvone** ｜ 当前版本 **v2.5**
 
 联机房间设置界面里那个 `⟳` 刷新按钮，帮你**一直点**，直到刷出你想要的因子组合为止。
 
@@ -31,7 +31,7 @@
 
 ## 安装
 
-从 [apk/](apk/) 拿 `soulknight-factor-roller-v2.4.apk` 装到手机上（Android 11 / API 30 及以上）。
+从 [apk/](apk/) 拿 `soulknight-factor-roller-v2.5.apk` 装到手机上（Android 11 / API 30 及以上）。
 
 签名证书：`CN=1carvone, OU=1carvone, O=1carvone`，SHA-256 指纹 `06972e3995f4cae16c8442262f195230d7b491640f4e851ba54cd5ad38fe5bae`
 
